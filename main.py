@@ -84,7 +84,7 @@ def format_docs(docs):
 async def chat_endpoint(request: ChatRequest):
     try:
         # --- Step 1: RAG retrieval ---
-        search_filter = {"allowed_roles": {"$in": [request.user_role]}}
+       #search_filter = {"allowed_roles": {"$in": [request.user_role]}}
         retriever = vector_db.as_retriever(search_kwargs={"k": 3, "filter": search_filter})
         
         docs = await retriever.ainvoke(request.query)
