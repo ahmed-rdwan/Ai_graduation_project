@@ -5,9 +5,7 @@ from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict
 
-
 from pymongo import MongoClient
-
 
 # LangChain Imports
 from langchain_community.vectorstores import Chroma
@@ -16,11 +14,7 @@ from langchain_core.messages import ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 # from langchain_groq import ChatGroq
 
-
-
 from allocation_engine import router as allocation_router
-
-
 
 # Tools
 from agent_tools import (
@@ -28,7 +22,7 @@ from agent_tools import (
     get_inventory, search_employee, get_my_tasks,
     get_sprint_status, log_attendance,
     checkout_attendance, get_my_tickets,
-    get_my_attendance, get_team_report , update_ticket_status
+    get_my_attendance, get_team_report, update_ticket_status
 )
 
 # -----------------------------------------------
@@ -37,13 +31,10 @@ from agent_tools import (
 load_dotenv()
 app = FastAPI(title="IT Management Agentic RAG API")
 
-MAX_HISTORY_MESSAGES = 4   # رفعناها لـ 6 عشان عندنا أدوات أكتر والسياق مهم
-
+MAX_HISTORY_MESSAGES = 4   # رفعناها عشان السياق مهم مع الأدوات
 
 client = MongoClient(os.getenv("MONGO_URI"))
 db = client["project_management"]
-
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,57 +44,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-
 # -----------------------------------------------
 # 2. RAG Setup
 # -----------------------------------------------
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
 
-
-
-
-
-
-
 # -----------------------------------------------
 # 3. LLM & Tools
 # -----------------------------------------------
-
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-
-# llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0, api_key=os.getenv("GROQ_API_KEY"))
-
-
 
 tools = [
     create_ticket, manage_stock, update_task_status,
     get_inventory, search_employee, get_my_tasks,
     get_sprint_status, log_attendance,
     checkout_attendance, get_my_tickets,
-    get_my_attendance, get_team_report , update_ticket_status
+    get_my_attendance, get_team_report, update_ticket_status
 ]
-
-
-
 
 agent_llm = llm.bind_tools(tools)
 
 # -----------------------------------------------
 # 4. Request Model
 # -----------------------------------------------
-
-
-
 class ChatRequest(BaseModel):
     query: str
     user_role: str
     user_id: str
     chat_history: List[Dict[str, str]] = []
-
-
-# دالة لتنظيف الداتا اللي راجعة من البحث
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
@@ -115,25 +84,22 @@ def format_docs(docs):
 async def chat_endpoint(request: ChatRequest):
     try:
         # --- Step 1: RAG retrieval ---
-        # --- الخطوة 1: جلب المعلومات من الداتا بيز (RAG) ---
         search_filter = {"allowed_roles": {"$in": [request.user_role]}}
-
-        ## عدد الحجات الي ببعتها للai موديل لما بعمل البحث في الداتا بيز (RAG) عشان ما يضيعش في معلومات كتير
         retriever = vector_db.as_retriever(search_kwargs={"k": 3, "filter": search_filter})
-        # جلب الداتا بناءً على السؤال
+        
         docs = await retriever.ainvoke(request.query)
         context = format_docs(docs)
 
         # --- Step 2: System prompt ---
-        
+        # التعديل: شلنا الـ Hardcoding تماماً وبقى دايناميك
         system_prompt = f"""You are an intelligent IT Management assistant.
 Current user: role='{request.user_role}', id='{request.user_id}'.
 
 TOOL RULES:
-1. ALWAYS pass '{request.user_role}' as `user_role` and '{request.user_id}' as `user_id` to EVERY tool.
+1. ALWAYS pass '{request.user_role}' as `user_role` and '{request.user_id}' as `user_id` to EVERY tool exactly as provided.
 2. Tools give LIVE data — prefer them over the Context snapshot for anything real-time.
-3. For personal requests ('my tasks', 'my tickets', 'my attendance', 'check in', 'check out') → ALWAYS call the relevant tool immediately, do not ask for clarification.
-4. For admin requests ('team report', 'inventory', 'manage stock') → call the tool if the user has the right role.
+3. For personal requests ('my tasks', 'my tickets', 'my attendance', 'check in', 'check out') → ALWAYS call the relevant tool immediately.
+4. For management/system requests ('team report', 'inventory', 'manage stock') → call the tool (the backend will handle authorization dynamically based on the user_role). Do NOT assume permissions.
 
 AVAILABLE TOOLS SUMMARY:
 - create_ticket        → report a bug or issue
@@ -141,13 +107,13 @@ AVAILABLE TOOLS SUMMARY:
 - update_task_status   → change a task's status
 - get_my_tasks         → see my assigned tasks
 - get_sprint_status    → sprint progress report
-- get_inventory        → view stock (admin only)
-- manage_stock         → add/remove stock items (admin only)
+- get_inventory        → view stock 
+- manage_stock         → add/remove stock items 
 - log_attendance       → check in for today
 - checkout_attendance  → check out for today
 - get_my_attendance    → view my attendance history
 - search_employee      → look up a colleague's info
-- get_team_report      → full team status (admin only)
+- get_team_report      → full team status 
 - update_ticket_status → close or change a ticket's status
 
 Context from system (background knowledge — may be outdated):
@@ -155,8 +121,8 @@ Context from system (background knowledge — may be outdated):
 
 ANSWER RULES:
 1. For live/personal/action requests → use the appropriate tool.
-2. For general IT questions → answer from Context.
-3. If not in Context and not IT-related → politely decline.
+2. For general IT/Project questions → answer from Context.
+3. If not in Context and not related to the project → politely decline.
 4. Keep responses concise and professional."""
 
         # --- Step 3: Build message list with history ---
@@ -186,7 +152,6 @@ ANSWER RULES:
             final_response = await agent_llm.ainvoke(messages)
             final_text = final_response.content
 
-            # تنظيف لو جه كـ list (Gemini quirk)
             if isinstance(final_text, list):
                 final_text = " ".join([i.get("text", "") for i in final_text if "text" in i])
 
@@ -197,7 +162,6 @@ ANSWER RULES:
             }
 
         else:
-            # سؤال عادي بدون أدوات
             final_text = response.content
             if isinstance(final_text, list):
                 final_text = " ".join([i.get("text", "") for i in final_text if "text" in i])
@@ -214,8 +178,4 @@ ANSWER RULES:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-
 app.include_router(allocation_router)
-
