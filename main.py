@@ -1,4 +1,5 @@
 import os
+import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -12,7 +13,6 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.messages import ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-# from langchain_groq import ChatGroq
 
 from allocation_engine import router as allocation_router
 
@@ -25,13 +25,10 @@ from agent_tools import (
     get_my_attendance, get_team_report, update_ticket_status
 )
 
-# -----------------------------------------------
-# 1. Setup
-# -----------------------------------------------
 load_dotenv()
 app = FastAPI(title="IT Management Agentic RAG API")
 
-MAX_HISTORY_MESSAGES = 4   # رفعناها عشان السياق مهم مع الأدوات
+MAX_HISTORY_MESSAGES = 4
 
 client = MongoClient(os.getenv("MONGO_URI"))
 db = client["project_management"]
@@ -45,13 +42,91 @@ app.add_middleware(
 )
 
 # -----------------------------------------------
-# 2. RAG Setup
+# 2. RAG Setup & Claude's Auto-Build
 # -----------------------------------------------
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-vector_db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+
+def load_vector_db():
+    db_path = "./chroma_db"
+    doc_count = 0
+    try:
+        vdb = Chroma(persist_directory=db_path, embedding_function=embeddings)
+        doc_count = vdb._collection.count()
+        print(f"✅ Chroma loaded — {doc_count} documents in vector DB.")
+    except Exception as e:
+        print(f"❌ Chroma load error: {e}")
+        vdb = None
+    return vdb, doc_count
+
+vector_db, doc_count = load_vector_db()
+
+# السيرفر بيشيك بنفسه: لو الذاكرة فاضية، هيبنيها فوراً
+if doc_count == 0:
+    print("⚠️ Vector DB is EMPTY — running setup now...")
+    from setup_vector_db import setup_database
+    setup_database()
+    vector_db, doc_count = load_vector_db()
+    print(f"✅ Setup complete — {doc_count} docs embedded.")
 
 # -----------------------------------------------
-# 3. LLM & Tools
+# 3. The Silent Watcher (Auto-Sync)
+# -----------------------------------------------
+async def silent_db_watcher():
+    last_count = -1
+    while True:
+        try:
+            # عد سريع جداً لأهم الجداول (مش بيسحب من السيرفر أي حاجة)
+            current_count = (
+                db.users.count_documents({}) + 
+                db.projects.count_documents({}) + 
+                db.tasks.count_documents({}) +
+                db.tickets.count_documents({})
+            )
+
+            # لو لقى العدد اتغير، يعمل تحديث في الخلفية
+            if last_count != -1 and current_count != last_count:
+                print(f"🔄 AI Noticed DB changes! (Count changed from {last_count} to {current_count}). Auto-syncing...")
+                
+                from setup_vector_db import setup_database
+                setup_database()
+                
+                global vector_db
+                vector_db, _ = load_vector_db()
+                print("✅ AI Memory updated successfully without Backend help!")
+
+            last_count = current_count
+            
+        except Exception as e:
+            print(f"❌ Watcher Error: {e}")
+
+        # ينام 15 دقيقة (900 ثانية) ويرجع يراقب تاني
+        await asyncio.sleep(900)
+
+@app.on_event("startup")
+async def start_watcher():
+    asyncio.create_task(silent_db_watcher())
+
+# -----------------------------------------------
+# 4. Debug & Admin Endpoints
+# -----------------------------------------------
+@app.get("/health")
+async def health_check():
+    count = vector_db._collection.count() if vector_db else 0
+    return {"status": "ok", "vector_db_docs": count}
+
+@app.post("/api/rebuild-db")
+async def rebuild_vector_db():
+    global vector_db
+    try:
+        from setup_vector_db import setup_database
+        setup_database()
+        vector_db, count = load_vector_db()
+        return {"message": f"✅ Vector DB rebuilt with {count} documents."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -----------------------------------------------
+# 5. LLM & Tools Setup
 # -----------------------------------------------
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
@@ -65,9 +140,6 @@ tools = [
 
 agent_llm = llm.bind_tools(tools)
 
-# -----------------------------------------------
-# 4. Request Model
-# -----------------------------------------------
 class ChatRequest(BaseModel):
     query: str
     user_role: str
@@ -78,20 +150,18 @@ def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 # -----------------------------------------------
-# 5. Main Endpoint
+# 6. Main Endpoint
 # -----------------------------------------------
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
         # --- Step 1: RAG retrieval ---
-
-        retriever = vector_db.as_retriever(search_kwargs={"k": 3})
+        retriever = vector_db.as_retriever(search_kwargs={"k": 4})
         
         docs = await retriever.ainvoke(request.query)
         context = format_docs(docs)
 
         # --- Step 2: System prompt ---
-        # التعديل: شلنا الـ Hardcoding تماماً وبقى دايناميك
         system_prompt = f"""You are an intelligent IT Management assistant.
 Current user: role='{request.user_role}', id='{request.user_id}'.
 
@@ -100,21 +170,6 @@ TOOL RULES:
 2. Tools give LIVE data — prefer them over the Context snapshot for anything real-time.
 3. For personal requests ('my tasks', 'my tickets', 'my attendance', 'check in', 'check out') → ALWAYS call the relevant tool immediately.
 4. For management/system requests ('team report', 'inventory', 'manage stock') → call the tool (the backend will handle authorization dynamically based on the user_role). Do NOT assume permissions.
-
-AVAILABLE TOOLS SUMMARY:
-- create_ticket        → report a bug or issue
-- get_my_tickets       → see my open/assigned tickets
-- update_task_status   → change a task's status
-- get_my_tasks         → see my assigned tasks
-- get_sprint_status    → sprint progress report
-- get_inventory        → view stock 
-- manage_stock         → add/remove stock items 
-- log_attendance       → check in for today
-- checkout_attendance  → check out for today
-- get_my_attendance    → view my attendance history
-- search_employee      → look up a colleague's info
-- get_team_report      → full team status 
-- update_ticket_status → close or change a ticket's status
 
 Context from system (background knowledge — may be outdated):
 {context}
