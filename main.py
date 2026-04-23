@@ -44,7 +44,7 @@ app.add_middleware(
 # 2. RAG Setup & Claude's Auto-Build
 # -----------------------------------------------
 # التعديل هنا: استخدام جوجل بدل HuggingFace
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 def load_vector_db():
     db_path = "./chroma_db"
