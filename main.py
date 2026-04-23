@@ -44,7 +44,7 @@ app.add_middleware(
 # 2. RAG Setup & Claude's Auto-Build
 # -----------------------------------------------
 # استخدام موديل جوجل الجديد المدعوم هنا كمان
-embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-004")
 
 def load_vector_db():
     db_path = "./chroma_db"

@@ -11,7 +11,7 @@ client = MongoClient(MONGO_URI)
 db = client["project_management"]
 
 # استخدام موديل جوجل الجديد المدعوم
-embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-004")
 
 def setup_database():
     documents = []
