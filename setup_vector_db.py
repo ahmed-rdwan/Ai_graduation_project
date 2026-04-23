@@ -3,7 +3,6 @@ from pymongo import MongoClient
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from dotenv import load_dotenv
-# التعديل هنا: شيلنا HuggingFace وحطينا جوجل
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 load_dotenv()
@@ -11,7 +10,7 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 client = MongoClient(MONGO_URI)
 db = client["project_management"]
 
-# استخدمنا موديل جوجل الخفيف جداً والسريع
+# استخدام موديل جوجل الجديد المدعوم
 embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 def setup_database():
