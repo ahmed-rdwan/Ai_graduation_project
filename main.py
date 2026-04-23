@@ -121,7 +121,7 @@ async def rebuild_vector_db():
 # -----------------------------------------------
 # 5. LLM & Tools Setup
 # -----------------------------------------------
-llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
 tools = [
     create_ticket, manage_stock, update_task_status,
