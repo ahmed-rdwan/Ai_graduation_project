@@ -45,7 +45,7 @@ app.add_middleware(
 # -----------------------------------------------
 # 2. RAG Setup
 # -----------------------------------------------
-embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-04")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 def load_vector_db():
     db_path = "./chroma_db"
