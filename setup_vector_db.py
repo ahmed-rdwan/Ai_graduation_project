@@ -11,8 +11,8 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 client = MongoClient(MONGO_URI)
 db = client["project_management"]
 
-# نفس الموديل اللي اشتغل معاك تمام
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+# الموديل الأساسي المعتمد من جوجل حالياً
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 
 def setup_database():
     documents = []
@@ -66,23 +66,24 @@ def setup_database():
             content = f"Work Assignment: Employee '{assigned_user.get('name', '')}' is currently assigned to work on Task: '{assigned_task.get('name', '')}'. Task Description: {assigned_task.get('description', '')}."
             documents.append(Document(page_content=content, metadata={"source_id": str(wt["_id"]), "type": "working_task"}))
 
-    print(f"Successfully extracted {len(documents)} documents. Embedding in batches to bypass Google limits...")
+    print(f"Successfully extracted {len(documents)} documents. Embedding in small batches to bypass Google limits...")
     
+    # تعريف الذاكرة الفاضية
     vector_db = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
     
-    # 🪄 السحر هنا: التقسيط المريح عشان منعديش الليميت
-    batch_size = 20
+    # 🪄 السحر هنا: هنقسم الملفات عشان منضربش الكوتة بتاعت جوجل
+    batch_size = 15  # 15 ملف بس في المرة الواحدة
     for i in range(0, len(documents), batch_size):
         batch = documents[i:i+batch_size]
         vector_db.add_documents(batch)
         print(f"✅ Embedded {min(i + batch_size, len(documents))} / {len(documents)}...")
         
-        # لو لسه في ملفات تانية، نام 10 ثواني
+        # لو لسه في ملفات تانية، نام 15 ثانية عشان جوجل تهدى ومتحسش بضغط
         if i + batch_size < len(documents):
-            print("⏳ Cooling down Google API for 10 seconds...")
-            time.sleep(10)
+            print("⏳ Cooling down Google API for 15 seconds to avoid rate limits...")
+            time.sleep(15)
 
-    print("🎉 Database setup complete and embedded with Google!")
+    print("🎉 Database setup complete and embedded successfully with Google!")
 
 if __name__ == "__main__":
     setup_database()

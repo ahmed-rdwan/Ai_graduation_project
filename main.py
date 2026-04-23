@@ -44,7 +44,7 @@ app.add_middleware(
 # 2. RAG Setup & Claude's Auto-Build
 # -----------------------------------------------
 # استخدام موديل جوجل الجديد المدعوم هنا كمان
-embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-004")
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 
 def load_vector_db():
     db_path = "./chroma_db"
@@ -93,7 +93,7 @@ async def silent_db_watcher():
         except Exception as e:
             print(f"❌ Watcher Error: {e}")
 
-        await asyncio.sleep(9000000000)
+        await asyncio.sleep(900)
 
 @app.on_event("startup")
 async def start_watcher():
@@ -121,7 +121,7 @@ async def rebuild_vector_db():
 # -----------------------------------------------
 # 5. LLM & Tools Setup
 # -----------------------------------------------
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
 tools = [
     create_ticket, manage_stock, update_task_status,
