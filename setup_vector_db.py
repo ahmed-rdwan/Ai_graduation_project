@@ -1,4 +1,5 @@
 import os
+import time
 from pymongo import MongoClient
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
@@ -10,8 +11,8 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 client = MongoClient(MONGO_URI)
 db = client["project_management"]
 
-# استخدام موديل جوجل الجديد المدعوم
-embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+# نفس الموديل اللي اشتغل معاك تمام
+embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 def setup_database():
     documents = []
@@ -65,9 +66,23 @@ def setup_database():
             content = f"Work Assignment: Employee '{assigned_user.get('name', '')}' is currently assigned to work on Task: '{assigned_task.get('name', '')}'. Task Description: {assigned_task.get('description', '')}."
             documents.append(Document(page_content=content, metadata={"source_id": str(wt["_id"]), "type": "working_task"}))
 
-    print(f"Successfully extracted {len(documents)} documents. Embedding using Google API...")
-    vector_db = Chroma.from_documents(documents=documents, embedding=embeddings, persist_directory="./chroma_db")
-    print("✅ Database setup complete and embedded with Google!")
+    print(f"Successfully extracted {len(documents)} documents. Embedding in batches to bypass Google limits...")
+    
+    vector_db = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
+    
+    # 🪄 السحر هنا: التقسيط المريح عشان منعديش الليميت
+    batch_size = 20
+    for i in range(0, len(documents), batch_size):
+        batch = documents[i:i+batch_size]
+        vector_db.add_documents(batch)
+        print(f"✅ Embedded {min(i + batch_size, len(documents))} / {len(documents)}...")
+        
+        # لو لسه في ملفات تانية، نام 10 ثواني
+        if i + batch_size < len(documents):
+            print("⏳ Cooling down Google API for 10 seconds...")
+            time.sleep(10)
+
+    print("🎉 Database setup complete and embedded with Google!")
 
 if __name__ == "__main__":
     setup_database()
