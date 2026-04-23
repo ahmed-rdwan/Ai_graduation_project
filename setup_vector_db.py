@@ -3,13 +3,16 @@ from pymongo import MongoClient
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from dotenv import load_dotenv
-from langchain_community.embeddings import HuggingFaceEmbeddings
+# التعديل هنا: شيلنا HuggingFace وحطينا جوجل
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 client = MongoClient(MONGO_URI)
 db = client["project_management"]
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+# استخدمنا موديل جوجل الخفيف جداً والسريع
+embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 def setup_database():
     documents = []
@@ -63,9 +66,9 @@ def setup_database():
             content = f"Work Assignment: Employee '{assigned_user.get('name', '')}' is currently assigned to work on Task: '{assigned_task.get('name', '')}'. Task Description: {assigned_task.get('description', '')}."
             documents.append(Document(page_content=content, metadata={"source_id": str(wt["_id"]), "type": "working_task"}))
 
-    print(f"Successfully extracted {len(documents)} documents. Embedding them locally now...")
+    print(f"Successfully extracted {len(documents)} documents. Embedding using Google API...")
     vector_db = Chroma.from_documents(documents=documents, embedding=embeddings, persist_directory="./chroma_db")
-    print("✅ Database setup complete and embedded locally!")
+    print("✅ Database setup complete and embedded with Google!")
 
 if __name__ == "__main__":
     setup_database()

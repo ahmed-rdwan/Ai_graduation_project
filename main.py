@@ -10,9 +10,8 @@ from pymongo import MongoClient
 
 # LangChain Imports
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.messages import ToolMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
 from allocation_engine import router as allocation_router
 
@@ -44,7 +43,8 @@ app.add_middleware(
 # -----------------------------------------------
 # 2. RAG Setup & Claude's Auto-Build
 # -----------------------------------------------
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+# التعديل هنا: استخدام جوجل بدل HuggingFace
+embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 def load_vector_db():
     db_path = "./chroma_db"
@@ -60,7 +60,6 @@ def load_vector_db():
 
 vector_db, doc_count = load_vector_db()
 
-# السيرفر بيشيك بنفسه: لو الذاكرة فاضية، هيبنيها فوراً
 if doc_count == 0:
     print("⚠️ Vector DB is EMPTY — running setup now...")
     from setup_vector_db import setup_database
@@ -75,7 +74,6 @@ async def silent_db_watcher():
     last_count = -1
     while True:
         try:
-            # عد سريع جداً لأهم الجداول (مش بيسحب من السيرفر أي حاجة)
             current_count = (
                 db.users.count_documents({}) + 
                 db.projects.count_documents({}) + 
@@ -83,23 +81,18 @@ async def silent_db_watcher():
                 db.tickets.count_documents({})
             )
 
-            # لو لقى العدد اتغير، يعمل تحديث في الخلفية
             if last_count != -1 and current_count != last_count:
-                print(f"🔄 AI Noticed DB changes! (Count changed from {last_count} to {current_count}). Auto-syncing...")
-                
+                print(f"🔄 AI Noticed DB changes! Count: {current_count}. Auto-syncing...")
                 from setup_vector_db import setup_database
                 setup_database()
-                
                 global vector_db
                 vector_db, _ = load_vector_db()
-                print("✅ AI Memory updated successfully without Backend help!")
+                print("✅ AI Memory updated successfully!")
 
             last_count = current_count
-            
         except Exception as e:
             print(f"❌ Watcher Error: {e}")
 
-        # ينام 15 دقيقة (900 ثانية) ويرجع يراقب تاني
         await asyncio.sleep(900)
 
 @app.on_event("startup")
@@ -155,13 +148,10 @@ def format_docs(docs):
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
-        # --- Step 1: RAG retrieval ---
         retriever = vector_db.as_retriever(search_kwargs={"k": 4})
-        
         docs = await retriever.ainvoke(request.query)
         context = format_docs(docs)
 
-        # --- Step 2: System prompt ---
         system_prompt = f"""You are an intelligent IT Management assistant.
 Current user: role='{request.user_role}', id='{request.user_id}'.
 
@@ -180,7 +170,6 @@ ANSWER RULES:
 3. If not in Context and not related to the project → politely decline.
 4. Keep responses concise and professional."""
 
-        # --- Step 3: Build message list with history ---
         limited_history = request.chat_history[-MAX_HISTORY_MESSAGES:]
         history_messages = []
         for msg in limited_history:
@@ -191,10 +180,8 @@ ANSWER RULES:
 
         messages = [("system", system_prompt)] + history_messages + [("human", request.query)]
 
-        # --- Step 4: First LLM call (decide: tool or answer?) ---
         response = await agent_llm.ainvoke(messages)
 
-        # --- Step 5: Execute tools if needed ---
         if response.tool_calls:
             messages.append(response)
 
@@ -203,29 +190,20 @@ ANSWER RULES:
                 result = selected_tool.invoke(tool_call["args"])
                 messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
 
-            # --- Step 6: Second LLM call to format the result naturally ---
             final_response = await agent_llm.ainvoke(messages)
             final_text = final_response.content
 
             if isinstance(final_text, list):
                 final_text = " ".join([i.get("text", "") for i in final_text if "text" in i])
 
-            return {
-                "response": final_text,
-                "role_used": request.user_role,
-                "action_taken": True
-            }
+            return {"response": final_text, "role_used": request.user_role, "action_taken": True}
 
         else:
             final_text = response.content
             if isinstance(final_text, list):
                 final_text = " ".join([i.get("text", "") for i in final_text if "text" in i])
 
-            return {
-                "response": final_text,
-                "role_used": request.user_role,
-                "action_taken": False
-            }
+            return {"response": final_text, "role_used": request.user_role, "action_taken": False}
 
     except Exception as e:
         import traceback
